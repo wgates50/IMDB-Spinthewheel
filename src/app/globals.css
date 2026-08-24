@@ -1,0 +1,145 @@
+@import "tailwindcss";
+
+/*
+ * IMDb's own palette: the yellow, the near-black page, and the grey card
+ * stack it uses for panels.
+ */
+@theme {
+  --color-imdb-yellow: #f5c518;
+  --color-imdb-yellow-dim: #c9a015;
+  --color-imdb-ink: #121212;
+  --color-imdb-black: #000000;
+  --color-imdb-panel: #1f1f1f;
+  --color-imdb-panel-2: #2a2a2a;
+  --color-imdb-line: #333333;
+  --color-imdb-text: #ffffff;
+  --color-imdb-muted: #b4b4b4;
+  --color-imdb-green: #4caf50;
+  --color-imdb-red: #e05c5c;
+
+  --font-sans: Roboto, "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-imdb-ink);
+  color: var(--color-imdb-text);
+  font-family: var(--font-sans);
+}
+
+/* Consistent focus ring on the dark background, for keyboard users. */
+:focus-visible {
+  outline: 2px solid var(--color-imdb-yellow);
+  outline-offset: 2px;
+}
+
+@layer components {
+  .panel {
+    background-color: var(--color-imdb-panel);
+    border: 1px solid var(--color-imdb-line);
+    border-radius: 0.75rem;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-imdb-line);
+    background-color: var(--color-imdb-panel-2);
+    padding: 0.25rem 0.7rem;
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: var(--color-imdb-text);
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+  }
+
+  .chip[data-active="true"] {
+    background-color: var(--color-imdb-yellow);
+    border-color: var(--color-imdb-yellow);
+    color: #000;
+    font-weight: 600;
+  }
+
+  .chip:hover:not(:disabled) {
+    border-color: var(--color-imdb-yellow);
+  }
+
+  .chip:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+/* Yellow track/thumb for the rating sliders. */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 1.5rem;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 0.3rem;
+  border-radius: 9999px;
+  background: var(--color-imdb-panel-2);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 0.3rem;
+  border-radius: 9999px;
+  background: var(--color-imdb-panel-2);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -0.35rem;
+  height: 1rem;
+  width: 1rem;
+  border-radius: 9999px;
+  background: var(--color-imdb-yellow);
+  border: 2px solid #000;
+}
+
+input[type="range"]::-moz-range-thumb {
+  height: 1rem;
+  width: 1rem;
+  border: 2px solid #000;
+  border-radius: 9999px;
+  background: var(--color-imdb-yellow);
+}
+
+input[type="range"]:disabled::-webkit-slider-thumb {
+  background: var(--color-imdb-line);
+}
+
+input[type="range"]:disabled::-moz-range-thumb {
+  background: var(--color-imdb-line);
+}
+
+@keyframes result-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-result-in {
+  animation: result-in 320ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-result-in {
+    animation: none;
+  }
+}
