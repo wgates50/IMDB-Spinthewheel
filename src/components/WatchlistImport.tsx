@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CsvImportError, parseImdbCsv } from "@/lib/csv";
 import type { WatchlistItem } from "@/lib/types";
-import type { WatchlistMeta } from "@/lib/storage";
+import { relativeTime, storage, type WatchlistMeta } from "@/lib/storage";
 
 type Tab = "file" | "link";
 
@@ -27,6 +27,16 @@ export function WatchlistImport({ meta, isDemo, onImported, onReset }: ImportPro
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
+  // localStorage is not readable during the server render, so the remembered
+  // link is filled in after mount — the same external-system exception the
+  // app shell makes when it restores the saved watchlist.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    const saved = storage.loadLastLink();
+    if (saved) setLink(saved);
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
   async function handleFile(file: File) {
     setError(null);
     setBusy(true);
@@ -34,6 +44,7 @@ export function WatchlistImport({ meta, isDemo, onImported, onReset }: ImportPro
       const items = parseImdbCsv(await file.text());
       onImported(items, {
         source: file.name,
+        kind: "file",
         importedAt: new Date().toISOString(),
         count: items.length,
       });
@@ -48,33 +59,42 @@ export function WatchlistImport({ meta, isDemo, onImported, onReset }: ImportPro
     }
   }
 
-  async function handleLink() {
+  async function importLink(source: string) {
     setError(null);
     setBusy(true);
     try {
       const response = await fetch("/api/watchlist", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ source: link }),
+        body: JSON.stringify({ source }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error ?? "Import failed.");
 
       const items = data.items as WatchlistItem[];
+      // Remember the link the viewer typed rather than the resolved page URL,
+      // so the field they see next time is the one they know.
+      storage.saveLastLink(source);
       onImported(
         items,
-        { source: data.source ?? link, importedAt: new Date().toISOString(), count: items.length },
+        {
+          source,
+          kind: "link",
+          importedAt: new Date().toISOString(),
+          count: items.length,
+        },
         data.partial
           ? "Some titles came back without genres or ratings, so those filters will miss them. The CSV export has the full data."
           : undefined,
       );
-      setLink("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Import failed.");
     } finally {
       setBusy(false);
     }
   }
+
+  const syncedAgo = meta ? relativeTime(meta.importedAt) : null;
 
   return (
     <div className="panel p-4 sm:p-5 space-y-4">
@@ -92,10 +112,26 @@ export function WatchlistImport({ meta, isDemo, onImported, onReset }: ImportPro
       </header>
 
       {meta && !isDemo ? (
-        <p className="text-sm text-imdb-muted -mt-1">
-          <span className="text-imdb-text font-semibold">{meta.count} titles</span> from{" "}
-          <span className="break-all">{meta.source}</span>
-        </p>
+        <div className="-mt-1 space-y-1.5">
+          <p className="text-sm text-imdb-muted">
+            <span className="text-imdb-text font-semibold">{meta.count} titles</span> from{" "}
+            <span className="break-all">{meta.source}</span>
+          </p>
+          <p className="text-xs text-imdb-muted">
+            Saved in this browser
+            {syncedAgo ? ` · imported ${syncedAgo}` : null}
+          </p>
+          {meta.kind === "link" ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void importLink(meta.source)}
+              className="text-xs text-imdb-yellow underline underline-offset-2 disabled:opacity-50"
+            >
+              {busy ? "Refreshing…" : "Refresh from IMDb"}
+            </button>
+          ) : null}
+        </div>
       ) : (
         <p className="text-sm text-imdb-muted -mt-1">
           Showing a sample list — import yours to spin your own watchlist.
@@ -196,25 +232,26 @@ export function WatchlistImport({ meta, isDemo, onImported, onReset }: ImportPro
               value={link}
               onChange={(event) => setLink(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter" && link.trim() && !busy) void handleLink();
+                if (event.key === "Enter" && link.trim() && !busy) void importLink(link.trim());
               }}
-              placeholder="imdb.com/user/ur… or ls…"
+              placeholder="Paste your IMDb watchlist link"
               aria-label="IMDb watchlist or list link"
               className="flex-1 min-w-0 rounded border border-imdb-line bg-imdb-panel-2 px-3 py-2 text-sm placeholder:text-imdb-muted/70"
             />
             <button
               type="button"
               disabled={busy || !link.trim()}
-              onClick={() => void handleLink()}
+              onClick={() => void importLink(link.trim())}
               className="rounded bg-imdb-yellow px-4 py-2 text-sm font-bold text-black hover:bg-imdb-yellow-dim disabled:opacity-50"
             >
               {busy ? "…" : "Load"}
             </button>
           </div>
           <p className="text-xs text-imdb-muted leading-relaxed">
-            Works only if the list is public (IMDb → Account settings → Privacy). IMDb has no public
-            API, so this reads the page directly and can break when IMDb changes it — the CSV export
-            is the dependable route.
+            Takes the link from IMDb&apos;s share button, or a bare ur/ls id. Works only if the list
+            is public (IMDb → Account settings → Privacy). IMDb has no public API, so this reads the
+            page directly and can break when IMDb changes it — the CSV export is the dependable
+            route. Whatever you import is remembered in this browser.
           </p>
         </div>
       )}

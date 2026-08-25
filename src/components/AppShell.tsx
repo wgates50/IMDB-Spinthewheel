@@ -4,16 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DEMO_WATCHLIST } from "@/data/demo";
 import { applyFilters, buildFacets } from "@/lib/filters";
 import { formatRuntime } from "@/lib/normalize";
-import { randomInt, sample } from "@/lib/random";
+import { randomInt } from "@/lib/random";
 import { guessRegion, storage, type HistoryEntry, type WatchlistMeta } from "@/lib/storage";
 import { DEFAULT_FILTERS, type Filters, type TitleDetails, type WatchlistItem } from "@/lib/types";
 import { FiltersPanel } from "./Filters";
 import { ResultPanel } from "./ResultPanel";
 import { WatchlistImport } from "./WatchlistImport";
-import { Wheel, type WheelHandle } from "./Wheel";
+import { Reel, type ReelHandle } from "./Reel";
 
-/** More wedges than this and the labels stop being readable. */
-const MAX_SEGMENTS = 16;
 /** How many past winners "skip my last few winners" holds back. */
 const RECENT_WINDOW = 5;
 const METASCORE_BATCH = 40;
@@ -40,9 +38,8 @@ export function AppShell({ hasOmdb, hasTmdb }: AppShellProps) {
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [failedMetascoreIds, setFailedMetascoreIds] = useState<ReadonlySet<string>>(new Set());
-  const [shortlistToken, setShortlistToken] = useState(0);
 
-  const wheelRef = useRef<WheelHandle>(null);
+  const reelRef = useRef<ReelHandle>(null);
   const resultRef = useRef<HTMLDivElement>(null);
   const hydratingRef = useRef(false);
 
@@ -89,20 +86,6 @@ export function AppShell({ hasOmdb, hasTmdb }: AppShellProps) {
     // recent-winner window has eaten everything that matches.
     return applyFilters(items, { ...filters, skipRecentWinners: false });
   }, [items, filters, excludedIds]);
-
-  /*
-   * Which titles are actually drawn. A big watchlist would render as an
-   * unreadable pinwheel, so the wheel shows a random shortlist instead. Drawing
-   * a uniform sample and then picking uniformly from it leaves every matching
-   * title equally likely, so the shortlist costs nothing in fairness.
-   * The wheel itself holds this steady for the length of a spin.
-   */
-  const wheelItems = useMemo(
-    () => sample(candidates, MAX_SEGMENTS),
-    // A new token is how the "shuffle" button asks for a fresh shortlist.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [candidates, shortlistToken],
-  );
 
   /* ---- Metascore hydration -------------------------------------------- */
 
@@ -197,17 +180,18 @@ export function AppShell({ hasOmdb, hasTmdb }: AppShellProps) {
   );
 
   const spin = useCallback(async () => {
-    if (spinning || !wheelItems.length) return;
+    if (spinning || !candidates.length) return;
 
     setSpinning(true);
     setDetails(null);
     setDetailsError(null);
     setNotice(null);
 
-    const winnerIndex = randomInt(wheelItems.length);
-    const picked = wheelItems[winnerIndex];
+    // Uniform over every title that passes the filters — the reel scrolls the
+    // whole pool, so nothing has to be left off to keep it readable.
+    const picked = candidates[randomInt(candidates.length)];
 
-    await wheelRef.current?.spinTo(winnerIndex);
+    await reelRef.current?.spinTo(picked);
 
     setWinner(picked);
     setSpinning(false);
@@ -225,13 +209,13 @@ export function AppShell({ hasOmdb, hasTmdb }: AppShellProps) {
     requestAnimationFrame(() => {
       resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
-  }, [spinning, wheelItems, region, loadDetails]);
+  }, [spinning, candidates, region, loadDetails]);
 
   /**
-   * The wheel holds its landed layout so the winner stays under the pointer.
-   * Anything the viewer does that should visibly change the wheel releases it.
+   * The reel holds its landed position so the winner stays in the marker band.
+   * Anything the viewer does that should visibly change the reel releases it.
    */
-  const releaseWheel = useCallback(() => wheelRef.current?.refresh(), []);
+  const releaseWheel = useCallback(() => reelRef.current?.refresh(), []);
 
   const handleFiltersChange = useCallback(
     (next: Filters) => {
@@ -240,11 +224,6 @@ export function AppShell({ hasOmdb, hasTmdb }: AppShellProps) {
     },
     [releaseWheel],
   );
-
-  const handleShuffle = useCallback(() => {
-    setShortlistToken((token) => token + 1);
-    releaseWheel();
-  }, [releaseWheel]);
 
   const handleRegionChange = useCallback(
     (next: string) => {
@@ -289,10 +268,9 @@ export function AppShell({ hasOmdb, hasTmdb }: AppShellProps) {
     });
   }, []);
 
-  const poolNote =
-    candidates.length > MAX_SEGMENTS
-      ? `${MAX_SEGMENTS} shortlisted at random from ${candidates.length} matching titles — every one of the ${candidates.length} has an equal chance.`
-      : null;
+  const poolNote = `Spinning all ${candidates.length} matching title${
+    candidates.length === 1 ? "" : "s"
+  } — each one equally likely.`;
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
@@ -392,34 +370,25 @@ export function AppShell({ hasOmdb, hasTmdb }: AppShellProps) {
 
         <div className="space-y-5">
           <div className="panel p-4 sm:p-6">
-            <Wheel ref={wheelRef} items={wheelItems} spinning={spinning} soundOn={soundOn} />
+            <Reel ref={reelRef} items={candidates} soundOn={soundOn} />
 
             <div className="mt-5 flex flex-col items-center gap-3">
               <button
                 type="button"
                 onClick={() => void spin()}
-                disabled={spinning || !wheelItems.length}
+                disabled={spinning || !candidates.length}
                 className="w-full max-w-xs rounded-lg bg-imdb-yellow px-6 py-3 text-lg font-extrabold text-black transition-colors hover:bg-imdb-yellow-dim disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {spinning ? "Spinning…" : winner ? "Spin again" : "Spin"}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleShuffle}
-                disabled={spinning || candidates.length <= MAX_SEGMENTS}
-                className="text-xs text-imdb-muted underline underline-offset-2 hover:text-imdb-yellow disabled:opacity-40 disabled:no-underline disabled:hover:text-imdb-muted"
-              >
-                Shuffle the shortlist
               </button>
 
               {!candidates.length ? (
                 <p className="text-center text-sm text-imdb-red">
                   Nothing matches those filters — loosen them a little.
                 </p>
-              ) : poolNote ? (
+              ) : (
                 <p className="max-w-md text-center text-xs text-imdb-muted">{poolNote}</p>
-              ) : null}
+              )}
             </div>
 
             {candidates.length ? (

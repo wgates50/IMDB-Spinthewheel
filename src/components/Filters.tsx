@@ -101,7 +101,7 @@ export function FiltersPanel({
 
       <p className="text-sm text-imdb-muted -mt-1">
         <span className="font-bold text-imdb-yellow">{matchCount}</span> of {totalCount} titles on the
-        wheel
+        reel
       </p>
 
       <Section title="Type">

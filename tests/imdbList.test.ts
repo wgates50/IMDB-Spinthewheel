@@ -72,8 +72,39 @@ describe("parseListRef", () => {
     });
   });
 
+  it("accepts the p. share link IMDb's share button produces", () => {
+    expect(
+      parseListRef(
+        "https://www.imdb.com/user/p.ci6puprdyl2jjrer2n4br4wrsm/watchlist/?sort=list_order%2Cdesc&ref_=ext_shr_lnk",
+      ),
+    ).toEqual({ kind: "share", id: "p.ci6puprdyl2jjrer2n4br4wrsm" });
+  });
+
+  it("accepts a bare share id", () => {
+    expect(parseListRef("p.ci6puprdyl2jjrer2n4br4wrsm")).toEqual({
+      kind: "share",
+      id: "p.ci6puprdyl2jjrer2n4br4wrsm",
+    });
+  });
+
+  it("keeps share ids case-sensitive", () => {
+    // Unlike ur/ls ids these are opaque tokens, so lowercasing could break them.
+    expect(parseListRef("https://www.imdb.com/user/p.AbCdEfGhIj123/watchlist/")).toEqual({
+      kind: "share",
+      id: "p.AbCdEfGhIj123",
+    });
+  });
+
+  it("prefers a share id over a ur/ls pattern hidden inside the token", () => {
+    expect(parseListRef("https://www.imdb.com/user/p.xxur123456xxls1234567xx/watchlist/")).toEqual({
+      kind: "share",
+      id: "p.xxur123456xxls1234567xx",
+    });
+  });
+
   it("rejects anything without an id", () => {
     expect(parseListRef("https://www.imdb.com/chart/top/")).toBeNull();
+    expect(parseListRef("https://www.imdb.com/user/p.short/watchlist/")).toBeNull();
   });
 });
 
