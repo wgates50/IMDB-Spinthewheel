@@ -263,6 +263,41 @@ export function itemsFromAnchors(html: string): WatchlistItem[] {
   return [...items.values()];
 }
 
+/** Structural facts about a page the extractors could not read. */
+export interface PageDiagnostics {
+  htmlLength: number;
+  scriptCount: number;
+  jsonScriptCount: number;
+  /** How many tt-ids appear anywhere in the markup. */
+  ttIdCount: number;
+  uniqueTtIds: number;
+  markers: Record<string, boolean>;
+}
+
+/**
+ * Describes the shape of a page without repeating its content. Attached to a
+ * failed import so a breakage can be diagnosed from the response instead of
+ * guessing at IMDb's current markup.
+ */
+export function describePage(html: string): PageDiagnostics {
+  const ttIds = html.match(/tt\d{7,9}/g) ?? [];
+  return {
+    htmlLength: html.length,
+    scriptCount: (html.match(/<script/gi) ?? []).length,
+    jsonScriptCount: (html.match(/type="application\/json"/gi) ?? []).length,
+    ttIdCount: ttIds.length,
+    uniqueTtIds: new Set(ttIds).size,
+    markers: {
+      titleListItemSearch: html.includes("titleListItemSearch"),
+      nextData: html.includes("__NEXT_DATA__"),
+      ldJson: html.includes("application/ld+json"),
+      titleText: html.includes("titleText"),
+      titleHref: /href="\/title\/tt\d/.test(html),
+      captcha: /captcha|are you a robot/i.test(html),
+    },
+  };
+}
+
 const MAX_PAGES = 6;
 
 /**
@@ -288,6 +323,7 @@ export async function importList(ref: ListRef): Promise<ListImportResult> {
   const collected = new Map<string, WatchlistItem>();
   let strategy: ListImportResult["strategy"] = "embedded-json";
   let sawPage = false;
+  let lastHtml = "";
 
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     let html: string;
@@ -308,6 +344,7 @@ export async function importList(ref: ListRef): Promise<ListImportResult> {
       );
     }
     sawPage = true;
+    lastHtml = html;
 
     let found = itemsFromEmbeddedJson(html);
     if (!found.length) {
@@ -328,12 +365,28 @@ export async function importList(ref: ListRef): Promise<ListImportResult> {
 
   const items = [...collected.values()];
   if (!items.length) {
-    throw new UpstreamError(
-      sawPage
-        ? "IMDb returned the page but no titles could be read from it. The list may be private, or IMDb changed its page format — use the CSV export instead."
-        : "Could not reach that list on IMDb.",
+    const diagnostics = lastHtml ? describePage(lastHtml) : null;
+    /*
+     * IMDb answers a server-side fetch for a watchlist with a ~2 KB shell and
+     * builds the list in the browser afterwards: no embedded JSON, no
+     * structured data, not one tt-id in the markup. Nothing can be parsed out
+     * of that, so say so plainly instead of implying the list might be private.
+     */
+    const isShell =
+      diagnostics !== null && diagnostics.ttIdCount === 0 && diagnostics.htmlLength < 8000;
+
+    const error = new UpstreamError(
+      !sawPage
+        ? "Could not reach that list on IMDb."
+        : isShell
+          ? "IMDb served a placeholder page instead of the list — it builds watchlists in the browser, so a link can't be read from outside one. Use the CSV export instead."
+          : "IMDb returned the page but no titles could be read from it. The list may be private, or IMDb changed its page format — use the CSV export instead.",
       422,
     );
+    // Say what the page looked like, so a breakage is diagnosable from the
+    // response rather than by guessing at IMDb's current markup.
+    if (diagnostics) error.diagnostics = diagnostics;
+    throw error;
   }
 
   const partial = items.some((item) => !item.genres.length || item.imdbRating === null);

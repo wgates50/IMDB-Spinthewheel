@@ -40,6 +40,10 @@ async function importFrom(source: string) {
     const status = error instanceof UpstreamError ? error.status : 502;
     const message =
       error instanceof Error ? error.message : "Could not import that list from IMDb.";
-    return NextResponse.json({ error: message }, { status: status === 404 ? 404 : status });
+    const diagnostics = error instanceof UpstreamError ? error.diagnostics : undefined;
+    return NextResponse.json(
+      diagnostics ? { error: message, diagnostics } : { error: message },
+      { status: status === 404 ? 404 : status },
+    );
   }
 }

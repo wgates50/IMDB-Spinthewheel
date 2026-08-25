@@ -248,10 +248,12 @@ export function WatchlistImport({ meta, isDemo, onImported, onReset }: ImportPro
             </button>
           </div>
           <p className="text-xs text-imdb-muted leading-relaxed">
-            Takes the link from IMDb&apos;s share button, or a bare ur/ls id. Works only if the list
-            is public (IMDb → Account settings → Privacy). IMDb has no public API, so this reads the
-            page directly and can break when IMDb changes it — the CSV export is the dependable
-            route. Whatever you import is remembered in this browser.
+            Takes the link from IMDb&apos;s share button, or a bare ur/ls id, and the list must be
+            public. Be warned: IMDb now builds watchlist pages in the browser and serves a
+            placeholder to everything else, so <span className="text-imdb-text">share links to a
+            personal watchlist currently import nothing</span>. Older public <code>ls…</code> lists
+            may still work. The CSV export is the route that reliably does. Whatever you import is
+            remembered in this browser.
           </p>
         </div>
       )}

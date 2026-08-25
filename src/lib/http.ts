@@ -7,6 +7,9 @@ const BROWSER_HEADERS = {
 } as const;
 
 export class UpstreamError extends Error {
+  /** Optional structural detail about what the upstream actually returned. */
+  diagnostics?: unknown;
+
   constructor(
     message: string,
     readonly status: number,
