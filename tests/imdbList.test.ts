@@ -225,3 +225,19 @@ describe("describePage", () => {
     expect(diagnostics).toMatchObject({ htmlLength: 0, scriptCount: 0, ttIdCount: 0 });
   });
 });
+
+describe("describePage on IMDb's shell response", () => {
+  it("recognises a page with no title data at all", () => {
+    // What imdb.com/user/p.<token>/watchlist/ actually returns to a server:
+    // roughly 2 KB, three scripts, and nothing else.
+    const shell = `<html><head><script src="a.js"></script><script src="b.js"></script>` +
+      `<script>window.x=1</script></head><body><div id="root"></div>${" ".repeat(1800)}</body></html>`;
+    const diagnostics = describePage(shell);
+    expect(diagnostics.ttIdCount).toBe(0);
+    expect(diagnostics.htmlLength).toBeLessThan(8000);
+    expect(diagnostics.markers.titleHref).toBe(false);
+    expect(diagnostics.markers.nextData).toBe(false);
+    // No captcha: IMDb is not blocking, just not rendering.
+    expect(diagnostics.markers.captcha).toBe(false);
+  });
+});

@@ -365,15 +365,27 @@ export async function importList(ref: ListRef): Promise<ListImportResult> {
 
   const items = [...collected.values()];
   if (!items.length) {
+    const diagnostics = lastHtml ? describePage(lastHtml) : null;
+    /*
+     * IMDb answers a server-side fetch for a watchlist with a ~2 KB shell and
+     * builds the list in the browser afterwards: no embedded JSON, no
+     * structured data, not one tt-id in the markup. Nothing can be parsed out
+     * of that, so say so plainly instead of implying the list might be private.
+     */
+    const isShell =
+      diagnostics !== null && diagnostics.ttIdCount === 0 && diagnostics.htmlLength < 8000;
+
     const error = new UpstreamError(
-      sawPage
-        ? "IMDb returned the page but no titles could be read from it. The list may be private, or IMDb changed its page format — use the CSV export instead."
-        : "Could not reach that list on IMDb.",
+      !sawPage
+        ? "Could not reach that list on IMDb."
+        : isShell
+          ? "IMDb served a placeholder page instead of the list — it builds watchlists in the browser, so a link can't be read from outside one. Use the CSV export instead."
+          : "IMDb returned the page but no titles could be read from it. The list may be private, or IMDb changed its page format — use the CSV export instead.",
       422,
     );
     // Say what the page looked like, so a breakage is diagnosable from the
     // response rather than by guessing at IMDb's current markup.
-    if (lastHtml) error.diagnostics = describePage(lastHtml);
+    if (diagnostics) error.diagnostics = diagnostics;
     throw error;
   }
 
