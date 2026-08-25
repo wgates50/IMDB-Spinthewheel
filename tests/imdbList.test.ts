@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  describePage,
   itemsFromAnchors,
   itemsFromEmbeddedJson,
   itemsFromLinkedData,
@@ -196,5 +197,31 @@ describe("itemsFromAnchors", () => {
 
   it("returns nothing for a page with no title links", () => {
     expect(itemsFromAnchors("<html><body>nope</body></html>")).toEqual([]);
+  });
+});
+
+describe("describePage", () => {
+  it("counts scripts, json blocks and tt ids without repeating content", () => {
+    const diagnostics = describePage(EMBEDDED);
+    expect(diagnostics.htmlLength).toBe(EMBEDDED.length);
+    expect(diagnostics.scriptCount).toBe(3);
+    expect(diagnostics.jsonScriptCount).toBe(3);
+    expect(diagnostics.uniqueTtIds).toBe(3);
+    expect(diagnostics.markers.titleListItemSearch).toBe(true);
+    expect(diagnostics.markers.titleText).toBe(true);
+  });
+
+  it("flags a page with title links", () => {
+    expect(describePage(TITLE_LINKS).markers.titleHref).toBe(true);
+    expect(describePage(EMBEDDED).markers.titleHref).toBe(false);
+  });
+
+  it("flags a captcha wall", () => {
+    expect(describePage("<html>Are you a robot?</html>").markers.captcha).toBe(true);
+  });
+
+  it("reports an empty page without throwing", () => {
+    const diagnostics = describePage("");
+    expect(diagnostics).toMatchObject({ htmlLength: 0, scriptCount: 0, ttIdCount: 0 });
   });
 });
