@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { itemsFromEmbeddedJson, itemsFromLinkedData, parseListRef } from "@/lib/imdbList";
+import {
+  itemsFromAnchors,
+  itemsFromEmbeddedJson,
+  itemsFromLinkedData,
+  parseListRef,
+} from "@/lib/imdbList";
 
 /**
  * A cut-down version of the JSON IMDb embeds in a list page. The real payload
@@ -72,8 +77,39 @@ describe("parseListRef", () => {
     });
   });
 
+  it("accepts the p. share link IMDb's share button produces", () => {
+    expect(
+      parseListRef(
+        "https://www.imdb.com/user/p.ci6puprdyl2jjrer2n4br4wrsm/watchlist/?sort=list_order%2Cdesc&ref_=ext_shr_lnk",
+      ),
+    ).toEqual({ kind: "share", id: "p.ci6puprdyl2jjrer2n4br4wrsm" });
+  });
+
+  it("accepts a bare share id", () => {
+    expect(parseListRef("p.ci6puprdyl2jjrer2n4br4wrsm")).toEqual({
+      kind: "share",
+      id: "p.ci6puprdyl2jjrer2n4br4wrsm",
+    });
+  });
+
+  it("keeps share ids case-sensitive", () => {
+    // Unlike ur/ls ids these are opaque tokens, so lowercasing could break them.
+    expect(parseListRef("https://www.imdb.com/user/p.AbCdEfGhIj123/watchlist/")).toEqual({
+      kind: "share",
+      id: "p.AbCdEfGhIj123",
+    });
+  });
+
+  it("prefers a share id over a ur/ls pattern hidden inside the token", () => {
+    expect(parseListRef("https://www.imdb.com/user/p.xxur123456xxls1234567xx/watchlist/")).toEqual({
+      kind: "share",
+      id: "p.xxur123456xxls1234567xx",
+    });
+  });
+
   it("rejects anything without an id", () => {
     expect(parseListRef("https://www.imdb.com/chart/top/")).toBeNull();
+    expect(parseListRef("https://www.imdb.com/user/p.short/watchlist/")).toBeNull();
   });
 });
 
@@ -121,5 +157,44 @@ describe("itemsFromLinkedData", () => {
     const items = itemsFromLinkedData(LINKED_DATA);
     expect(items.map((item) => item.title)).toEqual(["The Godfather", "The Wire"]);
     expect(items[1].category).toBe("tv");
+  });
+});
+
+/** How IMDb renders a list row: a poster link, then a numbered title link. */
+const TITLE_LINKS = `
+<html><body>
+  <a href="/title/tt0111161/?ref_=list_i_1"><img src="poster.jpg" alt="poster"/></a>
+  <a href="/title/tt0111161/?ref_=list_t_1"><h3 class="ipc-title__text">1. The Shawshank Redemption</h3></a>
+  <a href="/title/tt0068646/?ref_=list_t_2"><h3 class="ipc-title__text">2. The Godfather</h3></a>
+  <a href="/title/tt0903747/"><h3 class="ipc-title__text">3. Tom &amp; Jerry&#x27;s Show</h3></a>
+  <a href="/name/nm0000209/">Some Person</a>
+</body></html>`;
+
+describe("itemsFromAnchors", () => {
+  it("reads titles out of /title/ links when the JSON is unreadable", () => {
+    const items = itemsFromAnchors(TITLE_LINKS);
+    expect(items.map((item) => item.title)).toEqual([
+      "The Shawshank Redemption",
+      "The Godfather",
+      "Tom & Jerry's Show",
+    ]);
+  });
+
+  it("strips the list position and decodes entities", () => {
+    const items = itemsFromAnchors(TITLE_LINKS);
+    expect(items[2].title).toBe("Tom & Jerry's Show");
+  });
+
+  it("ignores links that are not titles", () => {
+    expect(itemsFromAnchors(TITLE_LINKS).some((item) => item.id.startsWith("nm"))).toBe(false);
+  });
+
+  it("takes the first text-bearing link and skips image-only ones", () => {
+    // The poster link for tt0111161 comes first and wraps only an <img>.
+    expect(itemsFromAnchors(TITLE_LINKS)[0].id).toBe("tt0111161");
+  });
+
+  it("returns nothing for a page with no title links", () => {
+    expect(itemsFromAnchors("<html><body>nope</body></html>")).toEqual([]);
   });
 });

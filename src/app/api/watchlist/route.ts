@@ -5,6 +5,11 @@ import { importList, parseListRef } from "@/lib/imdbList";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/** Importing a list is a read, so it is available as GET ?source=… too. */
+export async function GET(request: Request) {
+  return importFrom(new URL(request.url).searchParams.get("source") ?? "");
+}
+
 export async function POST(request: Request) {
   let body: { source?: unknown };
   try {
@@ -13,13 +18,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Expected a JSON body." }, { status: 400 });
   }
 
-  const source = typeof body.source === "string" ? body.source : "";
+  return importFrom(typeof body.source === "string" ? body.source : "");
+}
+
+async function importFrom(source: string) {
   const ref = parseListRef(source);
   if (!ref) {
     return NextResponse.json(
       {
         error:
-          "Paste an IMDb watchlist or list link, or just the id — it looks like ur12345678 or ls123456789.",
+          "Paste an IMDb watchlist or list link. That is a share link (imdb.com/user/p.…/watchlist/), a ur12345678 account id, or an ls123456789 list id.",
       },
       { status: 400 },
     );

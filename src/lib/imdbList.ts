@@ -6,28 +6,51 @@ import type { WatchlistItem } from "./types";
 export interface ListImportResult {
   items: WatchlistItem[];
   /** How the data was obtained, surfaced in the UI so gaps are explainable. */
-  strategy: "export-csv" | "embedded-json" | "linked-data";
+  strategy: "export-csv" | "embedded-json" | "linked-data" | "title-links";
   /** True when items are missing metadata that filters depend on. */
   partial: boolean;
   source: string;
 }
 
 export interface ListRef {
-  kind: "user" | "list";
+  /**
+   * "user"  - a classic ur… account id
+   * "list"  - an ls… list id
+   * "share" - the opaque p.… id IMDb's "share watchlist" button now produces
+   */
+  kind: "user" | "list" | "share";
   id: string;
 }
 
-/** Accepts a bare ur/ls id or any IMDb watchlist/list URL. */
+/**
+ * Accepts a bare id or any IMDb watchlist/list URL, in any of the three
+ * shapes IMDb currently hands out:
+ *   https://www.imdb.com/user/ur12345678/watchlist/
+ *   https://www.imdb.com/list/ls123456789/
+ *   https://www.imdb.com/user/p.ci6puprdyl2jjrer2n4br4wrsm/watchlist/?ref_=ext_shr_lnk
+ */
 export function parseListRef(input: string): ListRef | null {
   const trimmed = input.trim();
+
+  // Share ids are checked first: they are opaque, so a ur/ls pattern could in
+  // principle appear inside one.
+  const shareId =
+    trimmed.match(/\/user\/(p\.[A-Za-z0-9_-]{8,64})/)?.[1] ??
+    trimmed.match(/^(p\.[A-Za-z0-9_-]{8,64})$/)?.[1];
+  if (shareId) return { kind: "share", id: shareId };
+
   const listId = trimmed.match(/ls\d{6,12}/i)?.[0];
   if (listId) return { kind: "list", id: listId.toLowerCase() };
+
   const userId = trimmed.match(/ur\d{5,12}/i)?.[0];
   if (userId) return { kind: "user", id: userId.toLowerCase() };
+
   return null;
 }
 
-function exportUrl(ref: ListRef): string {
+/** Share links have no CSV export endpoint, so there is nothing to try. */
+function exportUrl(ref: ListRef): string | null {
+  if (ref.kind === "share") return null;
   return ref.kind === "list"
     ? `https://www.imdb.com/list/${ref.id}/export`
     : `https://www.imdb.com/user/${ref.id}/watchlist/export`;
@@ -191,6 +214,55 @@ export function itemsFromLinkedData(html: string): WatchlistItem[] {
   return [...items.values()];
 }
 
+/**
+ * Last resort: read titles straight out of the /title/tt…/ links on the page.
+ * These survive template changes that move the embedded JSON around, but they
+ * carry no genres or ratings, so a result built this way is flagged partial.
+ */
+export function itemsFromAnchors(html: string): WatchlistItem[] {
+  const items = new Map<string, WatchlistItem>();
+  const anchors = html.matchAll(
+    /<a[^>]+href="\/title\/(tt\d{6,10})\/?[^"]*"[^>]*>([\s\S]{0,400}?)<\/a>/gi,
+  );
+
+  for (const match of anchors) {
+    const id = match[1];
+    if (items.has(id)) continue;
+
+    const title = match[2]
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&#x27;|&apos;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/&nbsp;/g, " ")
+      .replace(/\s+/g, " ")
+      // List rows are numbered, e.g. "12. The Shawshank Redemption".
+      .replace(/^\s*\d+\.\s*/, "")
+      .trim();
+
+    // Poster and rating links wrap images rather than text.
+    if (!title || title.length > 200) continue;
+
+    items.set(id, {
+      id,
+      title,
+      year: null,
+      titleType: "Unknown",
+      category: "other",
+      imdbRating: null,
+      numVotes: null,
+      runtime: null,
+      genres: [],
+      directors: [],
+      url: titleUrl(id),
+      addedAt: null,
+      releaseDate: null,
+    });
+  }
+
+  return [...items.values()];
+}
+
 const MAX_PAGES = 6;
 
 /**
@@ -201,13 +273,16 @@ const MAX_PAGES = 6;
 export async function importList(ref: ListRef): Promise<ListImportResult> {
   const source = pageUrl(ref, 1);
 
-  try {
-    const csv = await fetchText(exportUrl(ref));
-    if (/(^|,)\s*"?Const"?\s*,/i.test(csv.slice(0, 2000))) {
-      return { items: parseImdbCsv(csv), strategy: "export-csv", partial: false, source };
+  const csvUrl = exportUrl(ref);
+  if (csvUrl) {
+    try {
+      const csv = await fetchText(csvUrl);
+      if (/(^|,)\s*"?Const"?\s*,/i.test(csv.slice(0, 2000))) {
+        return { items: parseImdbCsv(csv), strategy: "export-csv", partial: false, source };
+      }
+    } catch {
+      // Export is only served for public lists, and not on every account.
     }
-  } catch {
-    // Export is only served for public lists, and not on every account.
   }
 
   const collected = new Map<string, WatchlistItem>();
@@ -238,6 +313,10 @@ export async function importList(ref: ListRef): Promise<ListImportResult> {
     if (!found.length) {
       found = itemsFromLinkedData(html);
       if (found.length) strategy = "linked-data";
+    }
+    if (!found.length) {
+      found = itemsFromAnchors(html);
+      if (found.length) strategy = "title-links";
     }
 
     const before = collected.size;

@@ -24,14 +24,3 @@ export function shuffle<T>(items: readonly T[]): T[] {
   }
   return out;
 }
-
-/**
- * Picks `count` items uniformly at random without replacement. Used to build a
- * readable wheel out of a large pool: a uniform sample followed by a uniform
- * pick from that sample is still a uniform pick over the whole pool, so a big
- * watchlist stays fair even though only a slice of it is drawn.
- */
-export function sample<T>(items: readonly T[], count: number): T[] {
-  if (items.length <= count) return shuffle(items);
-  return shuffle(items).slice(0, count);
-}
