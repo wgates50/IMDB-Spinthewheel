@@ -4,7 +4,7 @@ Load your IMDb watchlist, filter it down to what you're in the mood for, and let
 wheel pick what you watch. When it lands you get the plot, cast, critic and
 audience scores, what reviewers liked and didn't, and where to stream it.
 
-![The wheel, mid-list](docs/screenshot.png)
+![The reel](docs/screenshot.png)
 
 ## Quick start
 
@@ -19,30 +19,45 @@ the wheel straight away; import yours to replace it.
 
 ## Getting your watchlist in
 
-**CSV export (recommended).** On IMDb, open your Watchlist, use the `⋯` menu and
-choose **Export**. IMDb prepares the file on its [exports page](https://www.imdb.com/exports/) —
-download it and drop it on the app. The file is parsed in your browser and never
-leaves your machine. This route carries everything the filters need: title type,
-genres, IMDb rating, runtime and year.
+IMDb has no public API, and it renders watchlist pages in the browser — a
+server-side fetch gets a 2 KB shell with no titles in it. So the import happens
+either in your browser or from a file. Three ways, best first:
 
-**Public list link.** Paste an IMDb watchlist or list URL (or just the `ur…` /
-`ls…` id). The server fetches the page and reads the titles out of it. IMDb has
-no public API, so this reads the page directly: it only works when the list is
-public, and it can break whenever IMDb changes its markup. The importer tries the
-CSV export endpoint first, then the JSON embedded in the page, then the page's
-structured data, and tells you when a result came back thin. Treat it as a
-convenience and the CSV export as the dependable route.
+**One-click bookmarklet (recommended).** Drag the yellow button from the app to
+your bookmarks bar. Then open your IMDb watchlist, click the bookmark, and paste
+the result into the app. It scrolls the list, reads it from the rendered page,
+and copies it — nothing is uploaded anywhere. You get titles, years, ratings,
+runtimes and types, but not genres.
 
-Whatever you import is kept in `localStorage`, so it's still there next visit.
+**CSV export (the one with genres).** On IMDb, open your Watchlist, use the `⋯`
+menu and choose **Export**. IMDb prepares the file on its
+[exports page](https://www.imdb.com/exports/) — download it, then either drop it
+on the app or paste its contents into the same box. This is the only route that
+carries genres, so it's the one to use if you want the genre filter.
+
+**Public list link.** A `ur…`/`ls…` id or URL, fetched server-side. This does
+*not* work for personal watchlists — IMDb serves that placeholder shell — and the
+app now says so plainly rather than guessing. Older public `ls…` lists may still
+work.
+
+The paste box takes any of it: the bookmarklet's JSON, CSV contents, or a rough
+list of `imdb.com/title/…` links. It sniffs the format rather than making you
+pick one.
+
+Whatever you import is kept in `localStorage`, and the last link you used is
+remembered so a re-sync is one click.
 
 ## Filters
 
 | Filter | Where the data comes from |
 | --- | --- |
-| Movies / TV / Other | Title type in your export |
-| Genre (any or all) | Genres in your export |
-| Minimum IMDb rating | IMDb rating in your export |
+| Movies / TV / Other | Title type — from any import |
+| Genre (any or all) | Genres — **CSV export only** |
+| Minimum IMDb rating | IMDb rating — from any import |
 | Minimum Metascore | Fetched from OMDb on demand |
+
+An import without genres turns the genre filter off rather than showing an empty
+one, and the app says which import you're on.
 
 IMDb exports don't include Metascores, so they're fetched only once you actually
 raise that slider, and only for titles that already clear your other filters —
@@ -72,12 +87,12 @@ pick your region on the result panel and it's remembered.
 
 ## How the pick is made
 
-A watchlist of 400 titles would render as an unreadable pinwheel, so the wheel
-shows a random shortlist of 16. Drawing a uniform sample and then picking
-uniformly from that sample leaves every matching title exactly as likely as any
-other, so nothing on your list is quietly unreachable. The winner is chosen with
-`crypto.getRandomValues` before the animation starts, and the wheel is then
-animated to land on it.
+The reel scrolls rows past a marker band rather than fitting them around a
+circle, so it spins your **entire** filtered list — nothing is left off to keep
+it readable. The winner is drawn uniformly with `crypto.getRandomValues`
+(rejection-sampled, so no modulo bias) before the animation starts, and the reel
+is animated to land on it. It holds that position afterwards so the result stays
+in the marker band.
 
 ## Scripts
 
@@ -107,6 +122,8 @@ src/
     WatchlistImport.tsx       CSV and link import
   lib/
     csv.ts                    RFC 4180 reader + IMDb export mapping
+    paste.ts                  sniffs pasted JSON / CSV / links into items
+    bookmarklet.ts            the script that reads IMDb's rendered page
     imdbList.ts               public list fetching and page parsing
     omdb.ts / tmdb.ts         upstream clients
     details.ts                merges both into one shape
