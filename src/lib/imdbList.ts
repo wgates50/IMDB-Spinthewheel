@@ -6,7 +6,7 @@ import type { WatchlistItem } from "./types";
 export interface ListImportResult {
   items: WatchlistItem[];
   /** How the data was obtained, surfaced in the UI so gaps are explainable. */
-  strategy: "export-csv" | "embedded-json" | "linked-data";
+  strategy: "export-csv" | "embedded-json" | "linked-data" | "title-links";
   /** True when items are missing metadata that filters depend on. */
   partial: boolean;
   source: string;
@@ -214,6 +214,55 @@ export function itemsFromLinkedData(html: string): WatchlistItem[] {
   return [...items.values()];
 }
 
+/**
+ * Last resort: read titles straight out of the /title/tt…/ links on the page.
+ * These survive template changes that move the embedded JSON around, but they
+ * carry no genres or ratings, so a result built this way is flagged partial.
+ */
+export function itemsFromAnchors(html: string): WatchlistItem[] {
+  const items = new Map<string, WatchlistItem>();
+  const anchors = html.matchAll(
+    /<a[^>]+href="\/title\/(tt\d{6,10})\/?[^"]*"[^>]*>([\s\S]{0,400}?)<\/a>/gi,
+  );
+
+  for (const match of anchors) {
+    const id = match[1];
+    if (items.has(id)) continue;
+
+    const title = match[2]
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&#x27;|&apos;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/&nbsp;/g, " ")
+      .replace(/\s+/g, " ")
+      // List rows are numbered, e.g. "12. The Shawshank Redemption".
+      .replace(/^\s*\d+\.\s*/, "")
+      .trim();
+
+    // Poster and rating links wrap images rather than text.
+    if (!title || title.length > 200) continue;
+
+    items.set(id, {
+      id,
+      title,
+      year: null,
+      titleType: "Unknown",
+      category: "other",
+      imdbRating: null,
+      numVotes: null,
+      runtime: null,
+      genres: [],
+      directors: [],
+      url: titleUrl(id),
+      addedAt: null,
+      releaseDate: null,
+    });
+  }
+
+  return [...items.values()];
+}
+
 const MAX_PAGES = 6;
 
 /**
@@ -264,6 +313,10 @@ export async function importList(ref: ListRef): Promise<ListImportResult> {
     if (!found.length) {
       found = itemsFromLinkedData(html);
       if (found.length) strategy = "linked-data";
+    }
+    if (!found.length) {
+      found = itemsFromAnchors(html);
+      if (found.length) strategy = "title-links";
     }
 
     const before = collected.size;
