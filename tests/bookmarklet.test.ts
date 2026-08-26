@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BOOKMARKLET_HREF, BOOKMARKLET_SOURCE } from "@/lib/bookmarklet";
+import { BOOKMARKLET_HREF } from "@/lib/bookmarklet";
 
 /**
  * A page shaped like IMDb's watchlist. The detail that matters is that IMDb
@@ -39,18 +39,29 @@ interface Collected {
   type: string;
 }
 
-let copied = "";
 let alerted: string[] = [];
 
+/**
+ * Runs the script decoded from BOOKMARKLET_HREF — the artifact that actually
+ * ships in the bookmark, not the pre-encoded source. Testing the source once
+ * hid a bug where flattening the URL let a line comment swallow the whole
+ * script, so the bookmarklet did nothing at all.
+ */
+function shippedScript(): string {
+  expect(BOOKMARKLET_HREF.startsWith("javascript:")).toBe(true);
+  return decodeURIComponent(BOOKMARKLET_HREF.slice("javascript:".length));
+}
+
 async function runBookmarklet(): Promise<Collected[]> {
-  await new Function(`return (async () => { ${BOOKMARKLET_SOURCE} })()`)();
+  await new Function(shippedScript())();
   // The script's scroll loop settles once no new rows appear.
   await new Promise((resolve) => setTimeout(resolve, 2500));
-  return JSON.parse(copied).items as Collected[];
+  const area = document.querySelector<HTMLTextAreaElement>("#spinwheel-import-panel textarea");
+  if (!area) throw new Error("bookmarklet produced no output panel");
+  return JSON.parse(area.value).items as Collected[];
 }
 
 beforeEach(() => {
-  copied = "";
   alerted = [];
   document.body.innerHTML = WATCHLIST;
 
@@ -69,13 +80,9 @@ beforeEach(() => {
     value: { hostname: "www.imdb.com" },
     writable: true,
   });
+  // jsdom has no clipboard; the panel's Copy button is the only user of it.
   Object.defineProperty(navigator, "clipboard", {
-    value: {
-      writeText: (text: string) => {
-        copied = text;
-        return Promise.resolve();
-      },
-    },
+    value: { writeText: () => Promise.resolve() },
     configurable: true,
   });
   window.alert = (message?: unknown) => void alerted.push(String(message));
@@ -91,7 +98,9 @@ describe("the IMDb bookmarklet", () => {
       "tt7366338",
       "tt0068646",
     ]);
-    expect(alerted[0]).toContain("4 titles copied");
+    expect(document.querySelector("#spinwheel-import-panel")?.textContent).toContain(
+      "4 titles ready",
+    );
   }, 15_000);
 
   it("reads runtimes correctly even though IMDb runs the fields together", async () => {
@@ -134,13 +143,42 @@ describe("the IMDb bookmarklet", () => {
       value: { hostname: "example.com" },
       writable: true,
     });
-    await new Function(`return (async () => { ${BOOKMARKLET_SOURCE} })()`)();
-    expect(alerted[0]).toContain("Open your IMDb watchlist first");
-    expect(copied).toBe("");
+    await new Function(shippedScript())();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const panel = document.querySelector("#spinwheel-import-panel");
+    expect(panel?.textContent).toContain("Open your IMDb watchlist");
+    expect(panel?.querySelector("textarea")).toBeNull();
+  });
+
+  it("reports on the page rather than through alert()", async () => {
+    // alert() can be suppressed, and a long scroll spends the click's user
+    // activation that navigator.clipboard needs. A panel always shows up.
+    await runBookmarklet();
+    expect(alerted).toHaveLength(0);
+    expect(document.querySelector("#spinwheel-import-panel")).not.toBeNull();
+  }, 15_000);
+
+  it("says so on the page when a watchlist has no titles", async () => {
+    document.body.innerHTML = "<div>nothing here</div>";
+    await new Function(shippedScript())();
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    expect(document.querySelector("#spinwheel-import-panel")?.textContent).toContain(
+      "No titles found",
+    );
+  }, 15_000);
+
+  it("survives being flattened onto one line", () => {
+    // The failure that shipped: collapsing newlines let the first line comment
+    // comment out the rest of the script. Block comments are safe; line
+    // comments are not, so the source must contain none.
+    const script = shippedScript();
+    expect(script).not.toMatch(/(^|[^:])\/\//m);
+    expect(script).toContain("\n");
   });
 
   it("is a single javascript: url that can be saved as a bookmark", () => {
     expect(BOOKMARKLET_HREF.startsWith("javascript:")).toBe(true);
+    // Encoded, so the URL itself carries no raw line breaks.
     expect(BOOKMARKLET_HREF).not.toContain("\n");
   });
 });
