@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { BOOKMARKLET_HREF } from "@/lib/bookmarklet";
 import { CsvImportError, parseImdbCsv } from "@/lib/csv";
+import { PasteError, parsePastedWatchlist } from "@/lib/paste";
 import type { WatchlistItem } from "@/lib/types";
 import { relativeTime, storage, type WatchlistMeta } from "@/lib/storage";
 
-type Tab = "file" | "link";
+type Tab = "paste" | "file" | "link";
 
 interface ImportProps {
   meta: WatchlistMeta | null;
@@ -15,17 +17,27 @@ interface ImportProps {
 }
 
 const TAB_LABELS: Record<Tab, string> = {
+  paste: "One-click",
   file: "CSV export",
-  link: "Public list link",
+  link: "Public link",
 };
 
 export function WatchlistImport({ meta, isDemo, onImported, onReset }: ImportProps) {
-  const [tab, setTab] = useState<Tab>("file");
+  const [tab, setTab] = useState<Tab>("paste");
+  const [pasted, setPasted] = useState("");
+  const [copied, setCopied] = useState(false);
   const [link, setLink] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const bookmarkletRef = useRef<HTMLAnchorElement>(null);
+
+  // React refuses to render a javascript: href, so the bookmarklet is attached
+  // after mount. Without it there is no drag-to-bookmarks-bar affordance.
+  useEffect(() => {
+    bookmarkletRef.current?.setAttribute("href", BOOKMARKLET_HREF);
+  }, []);
 
   // localStorage is not readable during the server render, so the remembered
   // link is filled in after mount — the same external-system exception the
@@ -56,6 +68,28 @@ export function WatchlistImport({ meta, isDemo, onImported, onReset }: ImportPro
       );
     } finally {
       setBusy(false);
+    }
+  }
+
+  function handlePaste() {
+    setError(null);
+    try {
+      const { items, format, partial } = parsePastedWatchlist(pasted);
+      onImported(
+        items,
+        {
+          source: format === "csv" ? "pasted CSV" : format === "json" ? "IMDb bookmarklet" : "pasted links",
+          kind: "file",
+          importedAt: new Date().toISOString(),
+          count: items.length,
+        },
+        partial
+          ? "These titles came in without genres, so the genre filter is off for them. The CSV export carries genres."
+          : undefined,
+      );
+      setPasted("");
+    } catch (cause) {
+      setError(cause instanceof PasteError ? cause.message : "Could not read that.");
     }
   }
 
@@ -157,7 +191,68 @@ export function WatchlistImport({ meta, isDemo, onImported, onReset }: ImportPro
         ))}
       </div>
 
-      {tab === "file" ? (
+      {tab === "paste" ? (
+        <div className="space-y-3">
+          <ol className="space-y-2 text-xs text-imdb-muted leading-relaxed list-decimal list-inside">
+            <li>
+              Drag this to your bookmarks bar (or right-click → copy link, and save it as a new
+              bookmark):{" "}
+              <a
+                ref={bookmarkletRef}
+                onClick={(event) => event.preventDefault()}
+                className="inline-block cursor-grab rounded bg-imdb-yellow px-2 py-0.5 text-xs font-bold text-black"
+                title="Drag me to your bookmarks bar"
+              >
+                Grab my watchlist
+              </a>
+            </li>
+            <li>Open your IMDb watchlist and click the bookmark. It scrolls the list and copies it.</li>
+            <li>Paste it below.</li>
+          </ol>
+
+          <textarea
+            value={pasted}
+            onChange={(event) => setPasted(event.target.value)}
+            placeholder="Paste here — the bookmarklet's output, CSV contents, or a list of imdb.com/title/… links"
+            aria-label="Paste your watchlist"
+            rows={4}
+            className="w-full rounded border border-imdb-line bg-imdb-panel-2 px-3 py-2 text-sm placeholder:text-imdb-muted/70"
+          />
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={!pasted.trim()}
+              onClick={handlePaste}
+              className="rounded bg-imdb-yellow px-4 py-2 text-sm font-bold text-black hover:bg-imdb-yellow-dim disabled:opacity-50"
+            >
+              Import
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(BOOKMARKLET_HREF);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                } catch {
+                  setError("Could not copy — drag the yellow button to your bookmarks bar instead.");
+                }
+              }}
+              className="rounded border border-imdb-line px-3 py-2 text-xs hover:border-imdb-yellow hover:text-imdb-yellow"
+            >
+              {copied ? "Copied!" : "Copy bookmarklet"}
+            </button>
+          </div>
+
+          <p className="text-xs text-imdb-muted leading-relaxed">
+            The bookmarklet runs on IMDb&apos;s own page, where your list is actually rendered — which
+            is why it works when a pasted link doesn&apos;t. It reads the page and copies it; nothing
+            is sent anywhere. It picks up titles, years, ratings and runtimes, but not genres — the
+            CSV export is still the one that carries those.
+          </p>
+        </div>
+      ) : tab === "file" ? (
         <div className="space-y-3">
           <div
             onDragOver={(event) => {
